@@ -1,13 +1,14 @@
-
 package com.phototherapy;
 
-import com.phototherapy.model.SensorReading;
+import com.vaadin.flow.component.UI;
+import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.grid.Grid;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H1;
 import com.vaadin.flow.component.html.H3;
 import com.vaadin.flow.component.html.Image;
 import com.vaadin.flow.component.html.Paragraph;
+import com.vaadin.flow.component.orderedlayout.FlexComponent;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.router.Route;
@@ -22,25 +23,32 @@ import org.jfree.data.xy.XYSeriesCollection;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 
 @Route("")
 public class DashboardView extends HorizontalLayout {
 
     private static final double TARGET_OPTICAL_VALUE = 100.0;
 
-    public DashboardView() {
+    private static final DateTimeFormatter TIME_FORMAT =
+            DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss");
 
+    public DashboardView() {
         setSizeFull();
         setPadding(false);
         setSpacing(false);
 
-        getStyle().set("background", "#0B1220");
+        getStyle()
+                .set("background", "#0B1220")
+                .set("color", "#F9FAFB");
+
         getElement().setAttribute("theme", "dark");
 
-        // Sidebar
+        // SIDEBAR
         VerticalLayout sidebar = new VerticalLayout();
-
         sidebar.setWidth("230px");
         sidebar.setPadding(true);
         sidebar.setSpacing(true);
@@ -52,13 +60,11 @@ public class DashboardView extends HorizontalLayout {
                 .set("box-sizing", "border-box");
 
         H3 logo = new H3("NeoLight");
-
         logo.getStyle()
                 .set("color", "#38BDF8")
                 .set("margin-bottom", "0");
 
         Paragraph subtitle = new Paragraph("Phototherapy Monitor");
-
         subtitle.getStyle()
                 .set("color", "#9CA3AF")
                 .set("font-size", "12px");
@@ -72,9 +78,8 @@ public class DashboardView extends HorizontalLayout {
                 new Paragraph("   Performance")
         );
 
-        // Main content
+        // MAIN CONTENT
         VerticalLayout content = new VerticalLayout();
-
         content.setSizeFull();
         content.setPadding(true);
         content.setSpacing(true);
@@ -86,76 +91,88 @@ public class DashboardView extends HorizontalLayout {
                 .set("box-sizing", "border-box");
 
         H1 title = new H1("Phototherapy Dashboard");
-
         title.getStyle().set("margin-bottom", "0");
 
         Paragraph description = new Paragraph(
                 "Sensor readings, optical processing, "
                         + "anomaly detection and performance."
         );
-
         description.getStyle().set("color", "#9CA3AF");
 
         content.add(title, description);
 
-        // Load CSV and build dashboard
+        // REFRESH TOOLBAR
+        HorizontalLayout toolbar = new HorizontalLayout();
+        toolbar.setWidthFull();
+        toolbar.setAlignItems(FlexComponent.Alignment.CENTER);
+        toolbar.setJustifyContentMode(
+                FlexComponent.JustifyContentMode.BETWEEN
+        );
+
+        Paragraph lastUpdated = new Paragraph(
+                "Last refreshed: "
+                        + LocalDateTime.now().format(TIME_FORMAT)
+        );
+        lastUpdated.getStyle()
+                .set("color", "#9CA3AF")
+                .set("font-size", "12px");
+
+        Button refreshButton = new Button(
+                "Refresh Dashboard",
+                event -> UI.getCurrent().getPage().reload()
+        );
+
+        refreshButton.getStyle()
+                .set("background", "#0284C7")
+                .set("color", "#FFFFFF")
+                .set("border-radius", "6px")
+                .set("cursor", "pointer");
+
+        toolbar.add(lastUpdated, refreshButton);
+        content.add(toolbar);
+
+        // LOAD READINGS FROM SQLITE
         try {
-
-            CsvDataSource dataSource = new CsvDataSource();
-
-            List<SensorReading> readings =
-                    dataSource.readReadings(
-                            "data/simulated_readings.csv"
-                    );
+            List<SensorDatabase.DatabaseReading> readings =
+                    SensorDatabase.getAllReadings();
 
             if (readings.isEmpty()) {
-                content.add(
-                        new Paragraph(
-                                "The CSV file contains no readings."
-                        )
+                Paragraph emptyMessage = new Paragraph(
+                        "No readings found in the database. "
+                                + "Run App.java to save simulated readings."
                 );
+
+                emptyMessage.getStyle().set("color", "#FBBF24");
+                content.add(emptyMessage);
 
                 add(sidebar, content);
                 setFlexGrow(1, content);
                 return;
             }
 
-            // Process optical readings
-            OpticalProcessor processor = new OpticalProcessor(3);
+            // CALCULATE METRICS
+            double opticalSum = 0.0;
+            double errorSum = 0.0;
+            int anomalyCount = 0;
 
-            List<Double> processedValues =
-                    processor.calculateMovingAverage(readings);
+            for (SensorDatabase.DatabaseReading reading : readings) {
+                opticalSum += reading.getRawOpticalValue();
 
-            // Calculate metrics
-            PerformanceAnalyzer analyzer = new PerformanceAnalyzer();
+                errorSum += Math.abs(
+                        TARGET_OPTICAL_VALUE
+                                - reading.getRawOpticalValue()
+                );
 
-            double meanOptical =
-                    analyzer.calculateMean(readings);
-
-            double meanAbsoluteError =
-                    analyzer.calculateMeanAbsoluteError(
-                            readings,
-                            TARGET_OPTICAL_VALUE
-                    );
-
-            double temperatureSum = 0.0;
-
-            for (SensorReading reading : readings) {
-                temperatureSum += reading.getTemperature();
+                if (reading.isAnomaly()) {
+                    anomalyCount++;
+                }
             }
 
-            double meanTemperature =
-                    temperatureSum / readings.size();
+            double meanOptical = opticalSum / readings.size();
+            double meanAbsoluteError = errorSum / readings.size();
 
-            // Detect anomalies
-            AnomalyDetector detector = new AnomalyDetector(3, 2.0);
-
-            List<Integer> anomalyIndexes =
-                    detector.detectOpticalAnomalies(readings);
-
-            // Metric cards
+            // METRIC CARDS
             HorizontalLayout metrics = new HorizontalLayout();
-
             metrics.setWidthFull();
             metrics.setSpacing(true);
             metrics.getStyle().set("flex-wrap", "wrap");
@@ -163,29 +180,29 @@ public class DashboardView extends HorizontalLayout {
             metrics.add(
                     createMetricCard(
                             "Mean Optical Output",
-                            String.format("%.2f", meanOptical),
-                            "From CSV sensor readings"
+                            format(meanOptical),
+                            "Calculated from SQLite readings"
                     ),
                     createMetricCard(
                             "Average Temperature",
-                            String.format("%.2f", meanTemperature),
-                            "CSV temperature readings"
+                            "Not stored",
+                            "Temperature is not in the database"
                     ),
                     createMetricCard(
                             "Mean Absolute Error",
-                            String.format("%.2f", meanAbsoluteError),
+                            format(meanAbsoluteError),
                             "Target: 100.00"
                     ),
                     createMetricCard(
                             "Anomalies",
-                            String.valueOf(anomalyIndexes.size()),
-                            "Detected in this dataset"
+                            String.valueOf(anomalyCount),
+                            "Anomaly flags saved in SQLite"
                     )
             );
 
             content.add(metrics);
 
-            // Optical graph
+            // GRAPH
             H3 chartHeading =
                     new H3("Optical Readings: Raw vs Processed");
 
@@ -193,8 +210,7 @@ public class DashboardView extends HorizontalLayout {
                     .set("margin-top", "16px")
                     .set("margin-bottom", "0");
 
-            byte[] chartImage =
-                    createOpticalChart(readings, processedValues);
+            byte[] chartImage = createOpticalChart(readings);
 
             StreamResource chartResource = new StreamResource(
                     "optical-readings.png",
@@ -214,7 +230,6 @@ public class DashboardView extends HorizontalLayout {
                     .set("background", "#FFFFFF");
 
             Div chartContainer = new Div(graph);
-
             chartContainer.setWidthFull();
 
             chartContainer.getStyle()
@@ -226,49 +241,52 @@ public class DashboardView extends HorizontalLayout {
 
             content.add(chartHeading, chartContainer);
 
-            // Sensor readings table
+            // SENSOR READINGS TABLE
             H3 tableHeading = new H3("Sensor Readings");
 
-            Grid<SensorReading> grid =
-                    new Grid<>(SensorReading.class, false);
+            Grid<SensorDatabase.DatabaseReading> grid =
+                    new Grid<>(SensorDatabase.DatabaseReading.class, false);
 
-            grid.addColumn(SensorReading::getTimestamp)
-                    .setHeader("Timestamp")
-                    .setAutoWidth(true);
+            grid.addColumn(
+                    SensorDatabase.DatabaseReading::getTimestamp
+            ).setHeader("Timestamp").setAutoWidth(true);
 
-            grid.addColumn(SensorReading::getTemperature)
-                    .setHeader("Temperature")
-                    .setAutoWidth(true);
+            grid.addColumn(
+                    SensorDatabase.DatabaseReading::getRawOpticalValue
+            ).setHeader("Raw Optical Value").setAutoWidth(true);
 
-            grid.addColumn(SensorReading::getOpticalValue)
-                    .setHeader("Raw Optical Value")
-                    .setAutoWidth(true);
+            grid.addColumn(
+                    reading -> format(reading.getProcessedOpticalValue())
+            ).setHeader("Processed Optical Value").setAutoWidth(true);
 
-            grid.addColumn(reading -> {
-                int index = readings.indexOf(reading);
+            grid.addColumn(
+                    reading -> reading.isAnomaly() ? "Yes" : "No"
+            ).setHeader("Anomaly").setAutoWidth(true);
 
-                if (index >= 0 && index < processedValues.size()) {
-                    return String.format(
-                            "%.2f",
-                            processedValues.get(index)
-                    );
-                }
-
-                return "N/A";
-            }).setHeader("Processed Optical Value")
-                    .setAutoWidth(true);
+            grid.addColumn(
+                    reading -> format(reading.getControllerOutput())
+            ).setHeader("Controller Output").setAutoWidth(true);
 
             grid.setItems(readings);
             grid.setWidthFull();
-            grid.setHeight("300px");
+
+            // SHOW UP TO SIX ROWS; SCROLL WHEN THERE ARE MORE
+            int visibleRows = Math.min(readings.size(), 6);
+
+            // Approx. 42 px per row, plus space for the header.
+            int tableHeight = 42 * visibleRows + 50;
+
+            grid.setHeight(tableHeight + "px");
+
+            grid.getStyle()
+                    .set("flex-shrink", "0");
 
             content.add(tableHeading, grid);
 
-            // Anomaly details
+            // ANOMALY ALERTS
             H3 anomalyHeading = new H3("Anomaly Alerts");
 
             VerticalLayout anomalyPanel = new VerticalLayout();
-
             anomalyPanel.setPadding(true);
             anomalyPanel.setSpacing(true);
 
@@ -277,44 +295,40 @@ public class DashboardView extends HorizontalLayout {
                     .set("border", "1px solid #263244")
                     .set("border-radius", "12px");
 
-            if (anomalyIndexes.isEmpty()) {
+            boolean foundAnomaly = false;
 
-                Paragraph noAnomalies = new Paragraph(
-                        "No optical anomalies detected in this dataset."
-                );
-
-                noAnomalies.getStyle().set("color", "#34D399");
-
-                anomalyPanel.add(noAnomalies);
-
-            } else {
-
-                for (int index : anomalyIndexes) {
-
-                    SensorReading reading = readings.get(index);
+            for (SensorDatabase.DatabaseReading reading : readings) {
+                if (reading.isAnomaly()) {
+                    foundAnomaly = true;
 
                     Paragraph alert = new Paragraph(
-                            "Anomaly at timestamp "
+                            "Anomaly at "
                                     + reading.getTimestamp()
                                     + " — optical value: "
-                                    + String.format(
-                                            "%.2f",
-                                            reading.getOpticalValue()
-                                    )
+                                    + format(reading.getRawOpticalValue())
                     );
 
                     alert.getStyle().set("color", "#FBBF24");
-
                     anomalyPanel.add(alert);
                 }
             }
 
+            if (!foundAnomaly) {
+                Paragraph noAnomalies = new Paragraph(
+                        "No anomaly flags were found in the database."
+                );
+
+                noAnomalies.getStyle().set("color", "#34D399");
+                anomalyPanel.add(noAnomalies);
+            }
+
             content.add(anomalyHeading, anomalyPanel);
 
-            // Demo status
+            // STATUS
             Paragraph status = new Paragraph(
-                    "DEMO MODE — Data is loaded from a simulated CSV file. "
-                            + "No physical medical device is connected."
+                    "DATABASE MODE — Readings are loaded from SQLite. "
+                            + "This is a demonstration dashboard; "
+                            + "no physical medical device is connected."
             );
 
             status.getStyle()
@@ -324,15 +338,12 @@ public class DashboardView extends HorizontalLayout {
             content.add(status);
 
         } catch (Exception e) {
-
             Paragraph error = new Paragraph(
                     "Unable to load dashboard data: " + e.getMessage()
             );
 
             error.getStyle().set("color", "#F87171");
-
             content.add(error);
-
             e.printStackTrace();
         }
 
@@ -340,13 +351,13 @@ public class DashboardView extends HorizontalLayout {
         setFlexGrow(1, content);
     }
 
+    // CREATE METRIC CARD
     private VerticalLayout createMetricCard(
             String heading,
             String value,
             String description) {
 
         VerticalLayout card = new VerticalLayout();
-
         card.setPadding(true);
         card.setSpacing(false);
         card.setWidth("220px");
@@ -358,67 +369,51 @@ public class DashboardView extends HorizontalLayout {
                 .set("box-sizing", "border-box");
 
         Paragraph label = new Paragraph(heading);
-
         label.getStyle()
                 .set("color", "#9CA3AF")
                 .set("font-size", "13px");
 
         H3 number = new H3(value);
-
         number.getStyle()
                 .set("color", "#38BDF8")
                 .set("margin", "4px 0");
 
         Paragraph detail = new Paragraph(description);
-
         detail.getStyle()
                 .set("color", "#9CA3AF")
                 .set("font-size", "11px");
 
         card.add(label, number, detail);
-
         return card;
     }
 
+    // CREATE GRAPH FROM DATABASE VALUES
     private byte[] createOpticalChart(
-            List<SensorReading> readings,
-            List<Double> processedValues) throws IOException {
+            List<SensorDatabase.DatabaseReading> readings)
+            throws IOException {
 
         XYSeries rawSeries = new XYSeries("Raw Optical Value");
-
         XYSeries processedSeries =
                 new XYSeries("Processed Optical Value");
 
-        int count = Math.min(
-                readings.size(),
-                processedValues.size()
-        );
+        for (int i = 0; i < readings.size(); i++) {
+            SensorDatabase.DatabaseReading reading = readings.get(i);
 
-        for (int i = 0; i < count; i++) {
-
-            SensorReading reading = readings.get(i);
-
-            double timestamp = reading.getTimestamp();
-
-            rawSeries.add(
-                    timestamp,
-                    reading.getOpticalValue()
-            );
+            rawSeries.add(i + 1, reading.getRawOpticalValue());
 
             processedSeries.add(
-                    timestamp,
-                    processedValues.get(i)
+                    i + 1,
+                    reading.getProcessedOpticalValue()
             );
         }
 
         XYSeriesCollection dataset = new XYSeriesCollection();
-
         dataset.addSeries(rawSeries);
         dataset.addSeries(processedSeries);
 
         JFreeChart chart = ChartFactory.createXYLineChart(
                 "Phototherapy Optical Readings",
-                "Timestamp",
+                "Reading Number",
                 "Optical Value",
                 dataset
         );
@@ -426,7 +421,6 @@ public class DashboardView extends HorizontalLayout {
         try (ByteArrayOutputStream output =
                      new ByteArrayOutputStream()) {
 
-            // FIX: write the chart to an OutputStream, not a File.
             ChartUtils.writeChartAsPNG(
                     output,
                     chart,
@@ -437,4 +431,9 @@ public class DashboardView extends HorizontalLayout {
             return output.toByteArray();
         }
     }
+
+    private String format(double value) {
+        return String.format(Locale.US, "%.2f", value);
+    }
 }
+
