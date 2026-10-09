@@ -1,3 +1,4 @@
+
 package com.phototherapy;
 
 import com.phototherapy.model.SensorReading;
@@ -10,320 +11,241 @@ public class App {
     public static void main(String[] args) {
 
         try {
-
-            // -----------------------------------------
-            // STEP 1: Load sensor data from CSV
-            // -----------------------------------------
-
+            // STEP 1: Load simulated sensor readings
             CsvDataSource dataSource = new CsvDataSource();
 
             List<SensorReading> readings =
                     dataSource.readReadings(
-                            "data/simulated_readings.csv"
-                    );
+                            "data/simulated_readings.csv");
 
-            // -----------------------------------------
-            // STEP 2: Validate sensor readings
-            // -----------------------------------------
+            if (readings.isEmpty()) {
+                System.out.println("No sensor readings found.");
+                return;
+            }
 
+            // STEP 2: Validate readings
             SensorValidator validator = new SensorValidator();
 
             for (SensorReading reading : readings) {
-
                 if (!validator.isValid(reading)) {
                     throw new IllegalArgumentException(
                             "Invalid sensor reading at timestamp: "
-                                    + reading.getTimestamp()
-                    );
+                                    + reading.getTimestamp());
                 }
             }
 
-            // -----------------------------------------
-            // STEP 3: Process optical readings
-            // -----------------------------------------
-
+            // STEP 3: Process optical readings using moving average
             OpticalProcessor opticalProcessor =
                     new OpticalProcessor(3);
 
             List<Double> processedOpticalValues =
                     opticalProcessor.calculateMovingAverage(readings);
 
-            System.out.println();
-            System.out.println(
-                    "--------- Processed Optical Values ---------"
-            );
+            System.out.println("\n--------- Processed Optical Values ---------");
 
-            for (int i = 0;
-                 i < processedOpticalValues.size();
-                 i++) {
-
+            for (int i = 0; i < readings.size(); i++) {
                 System.out.printf(
                         "Time %d : Raw = %.2f, Processed = %.2f%n",
                         readings.get(i).getTimestamp(),
                         readings.get(i).getOpticalValue(),
-                        processedOpticalValues.get(i)
-                );
+                        processedOpticalValues.get(i));
             }
 
-            // -----------------------------------------
-            // STEP 3B: Generate optical readings graph
-            // -----------------------------------------
-
-            double[] rawOpticalValues =
-                    new double[readings.size()];
-
+            // STEP 4: Generate optical readings graph
+            double[] rawOpticalValues = new double[readings.size()];
             double[] processedValues =
                     new double[processedOpticalValues.size()];
 
             for (int i = 0; i < readings.size(); i++) {
                 rawOpticalValues[i] =
                         readings.get(i).getOpticalValue();
-            }
-
-            for (int i = 0;
-                 i < processedOpticalValues.size();
-                 i++) {
 
                 processedValues[i] =
                         processedOpticalValues.get(i);
             }
 
             SensorGraph.createOpticalGraph(
-                    rawOpticalValues,
-                    processedValues
-            );
+                    rawOpticalValues, processedValues);
 
-            // -----------------------------------------
-            // STEP 4: Detect optical anomalies
-            // -----------------------------------------
-
+            // STEP 5: Detect anomalies
             AnomalyDetector anomalyDetector =
                     new AnomalyDetector(3, 2.0);
 
             List<Integer> anomalyIndexes =
                     anomalyDetector.detectOpticalAnomalies(readings);
 
-            System.out.println();
-            System.out.println(
-                    "--------- Anomaly Detection ---------"
-            );
+            System.out.println("\n--------- Anomaly Detection ---------");
 
             if (anomalyIndexes.isEmpty()) {
-
-                System.out.println(
-                        "No optical anomalies detected."
-                );
-
+                System.out.println("No optical anomalies detected.");
             } else {
-
                 for (int index : anomalyIndexes) {
-
                     SensorReading reading = readings.get(index);
 
                     System.out.printf(
-                            "Anomaly detected at time %d : Optical = %.2f%n",
+                            "Anomaly at time %d : Optical = %.2f%n",
                             reading.getTimestamp(),
-                            reading.getOpticalValue()
-                    );
+                            reading.getOpticalValue());
                 }
             }
 
-            // -----------------------------------------
-            // STEP 4B: Initialize and save to SQLite
-            // -----------------------------------------
-
+            // STEP 6: Configure the demonstration controller
             SensorDatabase.initializeDatabase();
 
-            System.out.println();
-            System.out.println(
-                    "--------- Saving Sensor Readings ---------"
-            );
+            PhototherapyController controller =
+                    new PhototherapyController();
 
+            // Demonstration values only.
+            // Replace these with validated measurements and
+            // values specified by your research paper.
+            double targetValue = 100.0;
+            double referenceIllumination = 100.0;
+            double elapsedSeconds = 1.0;
+
+            System.out.println("\n--------- Formula Calculations ---------");
+
+            // STEP 7: Calculate formulas for each reading
             for (int i = 0; i < readings.size(); i++) {
 
                 SensorReading reading = readings.get(i);
 
-                double rawValue =
-                        reading.getOpticalValue();
-
+                double rawValue = reading.getOpticalValue();
                 double processedValue =
                         processedOpticalValues.get(i);
 
-                boolean isAnomaly =
-                        anomalyIndexes.contains(i);
+                boolean isAnomaly = anomalyIndexes.contains(i);
 
-                // Placeholder until a real PID controller
-                // output is connected to the application.
-                double controllerOutput = 0.0;
+                // CF = Ipc / Ipe
+                // Here, processedValue is used as Ipc and the
+                // reference value as Ipe for demonstration.
+                double correctionFactor =
+                        controller.calculateCorrectionFactor(
+                                processedValue,
+                                referenceIllumination);
 
+                // e(t) = Isp - Ic(t)
+                double error =
+                        controller.calculateError(
+                                targetValue, processedValue);
+
+                // PID output using elapsed time
+                double pidOutput =
+                        controller.calculatePidOutput(
+                                targetValue,
+                                processedValue,
+                                elapsedSeconds);
+
+                // Map simulated PID output to 0-100%
+                double pwmPercentage =
+                        controller.calculatePwmPercentage(pidOutput);
+
+                // Demonstration duty-cycle calculation.
+                // Use a 100-unit period; PWM percentage determines
+                // ON time and the remaining time is OFF.
+                double onTime = pwmPercentage;
+                double offTime = 100.0 - pwmPercentage;
+
+                double dutyCycle =
+                        controller.calculateDutyCycle(
+                                onTime, offTime);
+
+                System.out.printf(
+                        "Time: %d | CF: %.3f | Error: %.2f"
+                                + " | PID: %.2f | PWM: %.2f%%"
+                                + " | Duty Cycle: %.2f%%%n",
+                        reading.getTimestamp(),
+                        correctionFactor,
+                        error,
+                        pidOutput,
+                        pwmPercentage,
+                        dutyCycle);
+
+                // Save the simulated PWM percentage as controller output.
+                // The existing database schema is unchanged.
                 SensorDatabase.saveReading(
                         rawValue,
                         processedValue,
                         isAnomaly,
-                        controllerOutput
-                );
+                        pwmPercentage);
             }
 
             System.out.println(
-                    "Sensor readings saved to SQLite database."
-            );
+                    "\nSensor readings and simulated controller outputs "
+                            + "saved to SQLite.");
 
-            // -----------------------------------------
-            // STEP 5: Set target optical value
-            // -----------------------------------------
-
-            double targetValue = 100.0;
-
-            // -----------------------------------------
-            // STEP 6: Create Performance Analyzer
-            // -----------------------------------------
-
+            // STEP 8: Calculate performance statistics
             PerformanceAnalyzer analyzer =
                     new PerformanceAnalyzer();
 
-            // -----------------------------------------
-            // STEP 7: Calculate performance metrics
-            // -----------------------------------------
-
-            double mean =
-                    analyzer.calculateMean(readings);
+            double mean = analyzer.calculateMean(readings);
 
             double standardDeviation =
                     analyzer.calculateStandardDeviation(readings);
 
-            double minimum =
-                    analyzer.findMinimum(readings);
+            double minimum = analyzer.findMinimum(readings);
 
-            double maximum =
-                    analyzer.findMaximum(readings);
+            double maximum = analyzer.findMaximum(readings);
 
             double meanAbsoluteError =
                     analyzer.calculateMeanAbsoluteError(
-                            readings,
-                            targetValue
-                    );
+                            readings, targetValue);
 
             double steadyStateError =
                     analyzer.calculateSteadyStateError(
-                            readings,
-                            targetValue
-                    );
+                            readings, targetValue);
 
             double overshoot =
                     analyzer.calculateOvershoot(
-                            readings,
-                            targetValue
-                    );
+                            readings, targetValue);
 
             double settlingTime =
                     analyzer.calculateSettlingTime(
-                            readings,
-                            targetValue,
-                            2.0
-                    );
+                            readings, targetValue, 2.0);
 
-            // -----------------------------------------
-            // STEP 8: Display Performance Report
-            // -----------------------------------------
-
-            System.out.println();
-            System.out.println(
-                    "========================================"
-            );
-            System.out.println(
-                    "   PHOTOTHERAPY PERFORMANCE ANALYSIS"
-            );
-            System.out.println(
-                    "========================================"
-            );
-
-            System.out.println();
+            // STEP 9: Display performance report
+            System.out.println("\n========================================");
+            System.out.println("   PHOTOTHERAPY PERFORMANCE ANALYSIS");
+            System.out.println("========================================");
 
             System.out.printf(
-                    "Number of Readings     : %d%n",
-                    readings.size()
-            );
+                    "Number of Readings     : %d%n", readings.size());
 
             System.out.printf(
-                    "Target Optical Output  : %.2f%n",
-                    targetValue
-            );
+                    "Target Optical Output  : %.2f%n", targetValue);
 
-            System.out.println();
-            System.out.println(
-                    "--------- Optical Performance ---------"
-            );
+            System.out.println("\n--------- Optical Performance ---------");
+
+            System.out.printf("Mean Output            : %.2f%n", mean);
+            System.out.printf(
+                    "Standard Deviation     : %.2f%n", standardDeviation);
+            System.out.printf("Minimum Output         : %.2f%n", minimum);
+            System.out.printf("Maximum Output         : %.2f%n", maximum);
+
+            System.out.println("\n--------- Control Performance ---------");
 
             System.out.printf(
-                    "Mean Output            : %.2f%n",
-                    mean
-            );
-
+                    "Mean Absolute Error    : %.2f%n", meanAbsoluteError);
             System.out.printf(
-                    "Standard Deviation     : %.2f%n",
-                    standardDeviation
-            );
-
-            System.out.printf(
-                    "Minimum Output         : %.2f%n",
-                    minimum
-            );
-
-            System.out.printf(
-                    "Maximum Output         : %.2f%n",
-                    maximum
-            );
-
-            System.out.println();
-            System.out.println(
-                    "--------- Control Performance ---------"
-            );
-
-            System.out.printf(
-                    "Mean Absolute Error    : %.2f%n",
-                    meanAbsoluteError
-            );
-
-            System.out.printf(
-                    "Steady-State Error     : %.2f%n",
-                    steadyStateError
-            );
-
-            System.out.printf(
-                    "Overshoot              : %.2f%%%n",
-                    overshoot
-            );
+                    "Steady-State Error     : %.2f%n", steadyStateError);
+            System.out.printf("Overshoot              : %.2f%%%n", overshoot);
 
             if (settlingTime == -1) {
-
-                System.out.println(
-                        "Settling Time          : Not Settled"
-                );
-
+                System.out.println("Settling Time          : Not Settled");
             } else {
-
                 System.out.printf(
                         "Settling Time          : %.2f seconds%n",
-                        settlingTime
-                );
+                        settlingTime);
             }
 
-            System.out.println();
-            System.out.println(
-                    "========================================"
-            );
+            System.out.println("========================================");
 
         } catch (IOException e) {
-
             System.out.println(
-                    "Error while loading sensor data or creating graph:"
-            );
-
+                    "Error loading sensor data or creating graph:");
             System.out.println(e.getMessage());
 
         } catch (IllegalArgumentException e) {
-
-            System.out.println("Invalid sensor data:");
+            System.out.println("Invalid input or formula parameters:");
             System.out.println(e.getMessage());
         }
     }
